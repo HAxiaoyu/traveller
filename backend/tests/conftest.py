@@ -84,3 +84,37 @@ def mock_plan_llm(mock_llm):
     r.content = json.dumps(SAMPLE_TRAVEL_PLAN, ensure_ascii=False)
     mock_llm.ainvoke.return_value = r
     return mock_llm
+
+
+@pytest.fixture
+def mock_geocode():
+    async def _fake_geocode(place_name="", city="", api_key=""):
+        return {"lat": 35.6895, "lng": 139.6917}
+
+    with patch(
+        "app.agent.enrichment.enrich.geocode",
+        new_callable=AsyncMock,
+        return_value={"lat": 35.6895, "lng": 139.6917},
+    ) as mock:
+        yield mock
+
+
+@pytest.fixture
+def mock_weather():
+    with patch(
+        "app.agent.enrichment.enrich.get_weather",
+        new_callable=AsyncMock,
+        return_value={
+            "description": "晴",
+            "temp": 22,
+            "temp_min": 18,
+            "temp_max": 26,
+            "humidity": 55,
+        },
+    ) as mock:
+        yield mock
+
+
+@pytest.fixture
+def mock_enrichment(mock_geocode, mock_weather):
+    return mock_geocode, mock_weather

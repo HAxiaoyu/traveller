@@ -301,7 +301,7 @@ async def test_main_graph_routes_to_end_when_slots_incomplete(mock_llm):
 
 
 @pytest.mark.asyncio
-async def test_main_graph_routes_to_planning_when_slots_complete(mock_llm):
+async def test_main_graph_routes_to_planning_when_slots_complete(mock_llm, mock_enrichment):
     from app.agent.graph import build_agent_graph
 
     mock_llm.ainvoke.return_value.content = json.dumps({})

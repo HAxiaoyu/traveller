@@ -28,6 +28,8 @@ class ChatRequest(BaseModel):
     model_provider: str = Field(default="openai")
     model_name: str = Field(default="gpt-4o")
     api_key: str = Field(default="")
+    google_maps_key: str = Field(default="")
+    weather_api_key: str = Field(default="")
 
 
 class ChatEvent(BaseModel):

@@ -139,7 +139,7 @@ async def test_chat_sse_streams_status_events(client, mock_llm):
 
 
 @pytest.mark.asyncio
-async def test_chat_sse_slots_complete_triggers_planning(client, mock_llm):
+async def test_chat_sse_slots_complete_triggers_planning(client, mock_llm, mock_enrichment):
     """SSE 聊天 → 槽位完整时进入行程规划流水线"""
     from unittest.mock import MagicMock
 
@@ -255,7 +255,7 @@ async def test_chat_empty_message_rejected(client):
 
 
 @pytest.mark.asyncio
-async def test_agent_graph_nodes_execute_in_order(mock_llm):
+async def test_agent_graph_nodes_execute_in_order(mock_llm, mock_enrichment):
     """槽位完整时 → 4 个节点按序执行"""
     from unittest.mock import MagicMock
 
@@ -351,7 +351,7 @@ async def test_agent_graph_stops_when_slots_incomplete(mock_llm):
 
 
 @pytest.mark.asyncio
-async def test_agent_graph_preserves_slots(mock_llm):
+async def test_agent_graph_preserves_slots(mock_llm, mock_enrichment):
     """Agent 图执行后 → 原有 slots 不丢失，energy_level 被补全"""
     from unittest.mock import MagicMock
 

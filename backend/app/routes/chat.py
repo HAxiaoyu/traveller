@@ -38,6 +38,8 @@ async def event_stream(session_id: str, body: ChatRequest, db: AsyncSession):
             "model_provider": body.model_provider,
             "model_name": body.model_name,
             "api_key": body.api_key,
+            "google_maps_key": body.google_maps_key,
+            "weather_api_key": body.weather_api_key,
             "slots_filled": False,
             "missing_slots": [],
             "follow_up_question": "",

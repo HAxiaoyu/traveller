@@ -241,7 +241,7 @@ async def test_generate_plan_validates_schema(mock_llm):
 
 
 @pytest.mark.asyncio
-async def test_main_graph_produces_travel_plan(mock_llm):
+async def test_main_graph_produces_travel_plan(mock_llm, mock_enrichment):
     from langchain_core.messages import HumanMessage
 
     from app.agent.graph import build_agent_graph
