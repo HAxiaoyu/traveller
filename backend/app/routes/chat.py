@@ -1,5 +1,5 @@
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
@@ -50,7 +50,7 @@ async def event_stream(session_id: str, body: ChatRequest, db: AsyncSession):
         messages.append(ai_msg)
 
         session.messages = messages
-        session.updated_at = datetime.utcnow()
+        session.updated_at = datetime.now(timezone.utc)
         await db.commit()
 
         yield f"event: done\ndata: {json.dumps({'content': echo_reply, 'travel_plan': None})}\n\n"
