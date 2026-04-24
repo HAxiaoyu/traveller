@@ -143,9 +143,36 @@ async def test_chat_sse_slots_complete_triggers_planning(client, mock_llm):
     """SSE 聊天 → 槽位完整时进入行程规划流水线"""
     from unittest.mock import MagicMock
 
-    r = MagicMock()
-    r.content = json.dumps({"destination": "东京", "days": 7, "interests": ["美食"]})
-    mock_llm.ainvoke.return_value = r
+    slots_r = MagicMock()
+    slots_r.content = json.dumps({"destination": "东京", "days": 7, "interests": ["美食"]})
+    plan_r = MagicMock()
+    plan_r.content = json.dumps(
+        {
+            "title": "东京美食之旅",
+            "days": [
+                {
+                    "day": 1,
+                    "city": "东京",
+                    "theme": "美食探索",
+                    "activities": [
+                        {
+                            "name": "筑地市场",
+                            "type": "美食",
+                            "lat": None,
+                            "lng": None,
+                            "duration": "2h",
+                            "time": "09:00",
+                            "notes": "",
+                        }
+                    ],
+                    "transport": {"mode": "步行", "duration": "约20分钟"},
+                    "hotel": "银座地区酒店",
+                }
+            ],
+        },
+        ensure_ascii=False,
+    )
+    mock_llm.ainvoke.side_effect = [slots_r, plan_r]
 
     r = await client.post("/api/session", json={})
     sid = r.json()["id"]
@@ -171,6 +198,12 @@ async def test_chat_sse_slots_complete_triggers_planning(client, mock_llm):
     assert "plan_generation" in steps_text
     assert "enrichment" in steps_text
     assert "format_response" in steps_text
+
+    # done 事件应包含 travel_plan
+    done_events = [e for e in events if e[0] == "done"]
+    assert len(done_events) == 1
+    assert done_events[0][1]["travel_plan"] is not None
+    assert done_events[0][1]["travel_plan"]["title"] == "东京美食之旅"
 
 
 @pytest.mark.asyncio
@@ -224,11 +257,42 @@ async def test_chat_empty_message_rejected(client):
 @pytest.mark.asyncio
 async def test_agent_graph_nodes_execute_in_order(mock_llm):
     """槽位完整时 → 4 个节点按序执行"""
+    from unittest.mock import MagicMock
+
     from langchain_core.messages import HumanMessage
 
     from app.agent.graph import build_agent_graph
 
-    mock_llm.ainvoke.return_value.content = json.dumps({})
+    slots_r = MagicMock()
+    slots_r.content = json.dumps({})
+    plan_r = MagicMock()
+    plan_r.content = json.dumps(
+        {
+            "title": "东京美食之旅",
+            "days": [
+                {
+                    "day": 1,
+                    "city": "东京",
+                    "theme": "美食",
+                    "activities": [
+                        {
+                            "name": "筑地市场",
+                            "type": "美食",
+                            "lat": None,
+                            "lng": None,
+                            "duration": "2h",
+                            "time": "09:00",
+                            "notes": "",
+                        }
+                    ],
+                    "transport": {"mode": "步行", "duration": "约20分钟"},
+                    "hotel": "银座酒店",
+                }
+            ],
+        },
+        ensure_ascii=False,
+    )
+    mock_llm.ainvoke.side_effect = [slots_r, plan_r]
 
     graph = build_agent_graph()
     state = {
@@ -252,6 +316,7 @@ async def test_agent_graph_nodes_execute_in_order(mock_llm):
     assert any("enrichment" in s for s in steps)
     assert any("format_response" in s for s in steps)
     assert result["slots_filled"] is True
+    assert result["travel_plan"] is not None
 
 
 @pytest.mark.asyncio
@@ -288,11 +353,42 @@ async def test_agent_graph_stops_when_slots_incomplete(mock_llm):
 @pytest.mark.asyncio
 async def test_agent_graph_preserves_slots(mock_llm):
     """Agent 图执行后 → 原有 slots 不丢失，energy_level 被补全"""
+    from unittest.mock import MagicMock
+
     from langchain_core.messages import HumanMessage
 
     from app.agent.graph import build_agent_graph
 
-    mock_llm.ainvoke.return_value.content = json.dumps({})
+    slots_r = MagicMock()
+    slots_r.content = json.dumps({})
+    plan_r = MagicMock()
+    plan_r.content = json.dumps(
+        {
+            "title": "Tokyo Trip",
+            "days": [
+                {
+                    "day": 1,
+                    "city": "Tokyo",
+                    "theme": "History",
+                    "activities": [
+                        {
+                            "name": "Asakusa",
+                            "type": "景点",
+                            "lat": None,
+                            "lng": None,
+                            "duration": "1h",
+                            "time": "09:00",
+                            "notes": "",
+                        }
+                    ],
+                    "transport": {"mode": "walk", "duration": "20min"},
+                    "hotel": "Tokyo Hotel",
+                }
+            ],
+        },
+        ensure_ascii=False,
+    )
+    mock_llm.ainvoke.side_effect = [slots_r, plan_r]
 
     graph = build_agent_graph()
     state = {

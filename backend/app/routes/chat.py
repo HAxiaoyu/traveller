@@ -50,9 +50,12 @@ async def event_stream(session_id: str, body: ChatRequest, db: AsyncSession):
 
         ai_content: str
         if final_state.get("slots_filled"):
-            ai_content = (
-                f"收到您的消息：「{body.message}」\n\nAgent 流水线已就绪，各节点执行完毕。"
-            )
+            travel_plan = final_state.get("travel_plan")
+            if travel_plan and travel_plan.get("days"):
+                day_count = len(travel_plan["days"])
+                ai_content = f"已为您规划好 {travel_plan['title']}，共 {day_count} 天行程，请查看。"
+            else:
+                ai_content = f"收到您的消息：「{body.message}」\n\nAgent 流水线已就绪，各节点执行完毕。"
         else:
             question = final_state.get("follow_up_question", "请告诉我更多关于您旅行的偏好。")
             ai_content = question
@@ -62,10 +65,11 @@ async def event_stream(session_id: str, body: ChatRequest, db: AsyncSession):
 
         session.messages = messages
         session.slots = final_state.get("slots", {})
+        session.travel_plan = final_state.get("travel_plan")
         session.updated_at = datetime.now(timezone.utc)
         await db.commit()
 
-        yield f"event: done\ndata: {json.dumps({'content': ai_content, 'travel_plan': None, 'slots_filled': final_state.get('slots_filled', False)})}\n\n"
+        yield f"event: done\ndata: {json.dumps({'content': ai_content, 'travel_plan': final_state.get('travel_plan'), 'slots_filled': final_state.get('slots_filled', False)})}\n\n"
 
     except Exception as e:
         yield f"event: error\ndata: {json.dumps({'content': '处理您的请求时遇到问题，请稍后重试'})}\n\n"

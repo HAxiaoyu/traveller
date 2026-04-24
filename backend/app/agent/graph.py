@@ -1,13 +1,8 @@
 from langgraph.graph import END, StateGraph
 
 from app.agent.intent_analysis import build_intent_analysis_subgraph
+from app.agent.plan_generation import generate_plan as plan_generation
 from app.agent.state import TravelPlannerState
-
-
-async def plan_generation(state: TravelPlannerState) -> dict:
-    steps: list[str] = list(state.get("intermediate_steps", []))
-    steps.append("plan_generation: 正在生成行程方案...")
-    return {"intermediate_steps": steps}
 
 
 async def enrichment(state: TravelPlannerState) -> dict:
