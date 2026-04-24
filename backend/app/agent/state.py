@@ -9,3 +9,9 @@ class TravelPlannerState(TypedDict):
     slots: dict
     travel_plan: dict | None
     intermediate_steps: list[str]
+    model_provider: str
+    model_name: str
+    api_key: str
+    slots_filled: bool
+    missing_slots: list[str]
+    follow_up_question: str

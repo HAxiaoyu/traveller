@@ -95,14 +95,16 @@ async def test_get_nonexistent_session(client):
 
 
 @pytest.mark.asyncio
-async def test_chat_sse_streams_all_events(client):
-    """SSE 聊天 → 应输出 6 个事件：1 条初始 status + 4 条节点 status + 1 条 done"""
+async def test_chat_sse_streams_status_events(client, mock_llm):
+    """SSE 聊天 → 槽位不完整时输出追问流程"""
+    mock_llm.ainvoke.return_value.content = "您想去哪里旅行呢？"
+
     r = await client.post("/api/session", json={})
     sid = r.json()["id"]
 
     r = await client.post(
         f"/api/chat/{sid}",
-        json={"message": "想去日本7天"},
+        json={"message": "你好"},
         timeout=10,
     )
     assert r.status_code == 200
@@ -116,31 +118,66 @@ async def test_chat_sse_streams_all_events(client):
         payload = json.loads(data_line.replace("data: ", ""))
         events.append((evt_type, payload))
 
-    assert len(events) == 6, f"期望 6 个事件，实际 {len(events)}"
+    assert len(events) == 5, f"期望 5 个事件，实际 {len(events)}"
 
     # 事件类型序列
     assert events[0][0] == "status"
     assert "正在分析您的偏好" in events[0][1]["content"]
 
     assert events[1][0] == "status"
-    assert "intent_analysis" in events[1][1]["content"]
+    assert "未从当前消息提取到新的偏好信息" in events[1][1]["content"]
 
     assert events[2][0] == "status"
-    assert "plan_generation" in events[2][1]["content"]
+    assert "槽位不完整" in events[2][1]["content"]
 
     assert events[3][0] == "status"
-    assert "enrichment" in events[3][1]["content"]
+    assert "追问 →" in events[3][1]["content"]
 
-    assert events[4][0] == "status"
-    assert "format_response" in events[4][1]["content"]
-
-    assert events[5][0] == "done"
-    assert "收到您的消息" in events[5][1]["content"]
+    assert events[4][0] == "done"
+    assert "您想去哪里旅行呢" in events[4][1]["content"]
+    assert events[4][1]["slots_filled"] is False
 
 
 @pytest.mark.asyncio
-async def test_chat_sse_persists_messages(client):
+async def test_chat_sse_slots_complete_triggers_planning(client, mock_llm):
+    """SSE 聊天 → 槽位完整时进入行程规划流水线"""
+    from unittest.mock import MagicMock
+
+    r = MagicMock()
+    r.content = json.dumps({"destination": "东京", "days": 7, "interests": ["美食"]})
+    mock_llm.ainvoke.return_value = r
+
+    r = await client.post("/api/session", json={})
+    sid = r.json()["id"]
+
+    r = await client.post(
+        f"/api/chat/{sid}",
+        json={"message": "想去东京7天美食之旅"},
+        timeout=10,
+    )
+    assert r.status_code == 200
+
+    lines = [ln for ln in r.text.strip().split("\n") if ln]
+    events = []
+    for i in range(0, len(lines), 2):
+        event_line = lines[i]
+        data_line = lines[i + 1]
+        evt_type = event_line.replace("event: ", "")
+        payload = json.loads(data_line.replace("data: ", ""))
+        events.append((evt_type, payload))
+
+    # 应该包含 plan_generation, enrichment, format_response
+    steps_text = " ".join(e[1]["content"] for e in events if e[0] == "status")
+    assert "plan_generation" in steps_text
+    assert "enrichment" in steps_text
+    assert "format_response" in steps_text
+
+
+@pytest.mark.asyncio
+async def test_chat_sse_persists_messages(client, mock_llm):
     """聊天后刷新会话详情 → 应看到 user + assistant 两条消息"""
+    mock_llm.ainvoke.return_value.content = "您想去哪里旅行呢？"
+
     r = await client.post("/api/session", json={})
     sid = r.json()["id"]
 
@@ -152,7 +189,7 @@ async def test_chat_sse_persists_messages(client):
     assert data["messages"][0]["role"] == "user"
     assert data["messages"][0]["content"] == "Hello"
     assert data["messages"][1]["role"] == "assistant"
-    assert "Agent 流水线已就绪" in data["messages"][1]["content"]
+    assert "您想去哪里旅行呢" in data["messages"][1]["content"]
 
 
 @pytest.mark.asyncio
@@ -185,46 +222,95 @@ async def test_chat_empty_message_rejected(client):
 
 
 @pytest.mark.asyncio
-async def test_agent_graph_nodes_execute_in_order():
-    """直接调用 Agent 图 → 验证 4 个节点按序执行"""
+async def test_agent_graph_nodes_execute_in_order(mock_llm):
+    """槽位完整时 → 4 个节点按序执行"""
     from langchain_core.messages import HumanMessage
 
     from app.agent.graph import build_agent_graph
 
+    mock_llm.ainvoke.return_value.content = json.dumps({})
+
     graph = build_agent_graph()
     state = {
         "messages": [HumanMessage(content="测试")],
-        "slots": {},
+        "slots": {"destination": "东京", "days": 7, "interests": ["美食"]},
         "travel_plan": None,
         "intermediate_steps": [],
+        "model_provider": "openai",
+        "model_name": "gpt-4o",
+        "api_key": "",
+        "slots_filled": False,
+        "missing_slots": [],
+        "follow_up_question": "",
     }
 
     result = await graph.ainvoke(state)
     steps = result["intermediate_steps"]
 
-    assert len(steps) == 4
-    assert steps[0].startswith("intent_analysis:")
-    assert steps[1].startswith("plan_generation:")
-    assert steps[2].startswith("enrichment:")
-    assert steps[3].startswith("format_response:")
+    assert any("intent_analysis" in s for s in steps)
+    assert any("plan_generation" in s for s in steps)
+    assert any("enrichment" in s for s in steps)
+    assert any("format_response" in s for s in steps)
+    assert result["slots_filled"] is True
 
 
 @pytest.mark.asyncio
-async def test_agent_graph_preserves_state():
-    """Agent 图执行后 → 原始 state 字段不丢失"""
+async def test_agent_graph_stops_when_slots_incomplete(mock_llm):
+    """槽位不完整时 → 图在 intent_analysis 之后终止"""
     from langchain_core.messages import HumanMessage
 
     from app.agent.graph import build_agent_graph
 
+    mock_llm.ainvoke.return_value.content = "您想去哪里？"
+
     graph = build_agent_graph()
     state = {
-        "messages": [HumanMessage(content="test")],
-        "slots": {"destination": "Tokyo"},
+        "messages": [HumanMessage(content="你好")],
+        "slots": {},
         "travel_plan": None,
         "intermediate_steps": [],
+        "model_provider": "openai",
+        "model_name": "gpt-4o",
+        "api_key": "",
+        "slots_filled": False,
+        "missing_slots": [],
+        "follow_up_question": "",
     }
 
     result = await graph.ainvoke(state)
-    assert result["slots"] == {"destination": "Tokyo"}
-    assert result["travel_plan"] is None
+    steps = result["intermediate_steps"]
+
+    assert result["slots_filled"] is False
+    assert not any("plan_generation" in s for s in steps)
+    assert "follow_up_question" in result
+
+
+@pytest.mark.asyncio
+async def test_agent_graph_preserves_slots(mock_llm):
+    """Agent 图执行后 → 原有 slots 不丢失，energy_level 被补全"""
+    from langchain_core.messages import HumanMessage
+
+    from app.agent.graph import build_agent_graph
+
+    mock_llm.ainvoke.return_value.content = json.dumps({})
+
+    graph = build_agent_graph()
+    state = {
+        "messages": [HumanMessage(content="test")],
+        "slots": {"destination": "Tokyo", "days": 5, "interests": ["history"]},
+        "travel_plan": None,
+        "intermediate_steps": [],
+        "model_provider": "openai",
+        "model_name": "gpt-4o",
+        "api_key": "",
+        "slots_filled": False,
+        "missing_slots": [],
+        "follow_up_question": "",
+    }
+
+    result = await graph.ainvoke(state)
+    assert result["slots"]["destination"] == "Tokyo"
+    assert result["slots"]["days"] == 5
+    assert result["slots"]["interests"] == ["history"]
+    assert result["slots"]["energy_level"] == "适中"
     assert len(result["messages"]) == 1

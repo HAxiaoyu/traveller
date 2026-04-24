@@ -35,6 +35,12 @@ async def event_stream(session_id: str, body: ChatRequest, db: AsyncSession):
             "slots": session.slots or {},
             "travel_plan": None,
             "intermediate_steps": [],
+            "model_provider": body.model_provider,
+            "model_name": body.model_name,
+            "api_key": body.api_key,
+            "slots_filled": False,
+            "missing_slots": [],
+            "follow_up_question": "",
         }
 
         final_state = await graph.ainvoke(state)
@@ -42,21 +48,27 @@ async def event_stream(session_id: str, body: ChatRequest, db: AsyncSession):
         for step in final_state.get("intermediate_steps", []):
             yield f"event: status\ndata: {json.dumps({'content': step})}\n\n"
 
-        echo_reply = (
-            f"收到您的消息：「{body.message}」\n\nAgent 流水线已就绪，各节点执行完毕。"
-        )
+        ai_content: str
+        if final_state.get("slots_filled"):
+            ai_content = (
+                f"收到您的消息：「{body.message}」\n\nAgent 流水线已就绪，各节点执行完毕。"
+            )
+        else:
+            question = final_state.get("follow_up_question", "请告诉我更多关于您旅行的偏好。")
+            ai_content = question
 
-        ai_msg = {"role": "assistant", "content": echo_reply}
+        ai_msg = {"role": "assistant", "content": ai_content}
         messages.append(ai_msg)
 
         session.messages = messages
+        session.slots = final_state.get("slots", {})
         session.updated_at = datetime.now(timezone.utc)
         await db.commit()
 
-        yield f"event: done\ndata: {json.dumps({'content': echo_reply, 'travel_plan': None})}\n\n"
+        yield f"event: done\ndata: {json.dumps({'content': ai_content, 'travel_plan': None, 'slots_filled': final_state.get('slots_filled', False)})}\n\n"
 
     except Exception as e:
-        yield f"event: error\ndata: {json.dumps({'content': f'处理出错: {str(e)}'})}\n\n"
+        yield f"event: error\ndata: {json.dumps({'content': '处理您的请求时遇到问题，请稍后重试'})}\n\n"
 
 
 @router.post("/chat/{session_id}")
