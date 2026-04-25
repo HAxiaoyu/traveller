@@ -49,6 +49,9 @@ async def _enrich_days(
             *(_geocode_one(addr, maps_key) for _, _, addr in geocode_tasks),
             return_exceptions=True,
         )
+        geocode_failures = sum(1 for r in geocode_results if not isinstance(r, dict))
+        if geocode_failures > 0:
+            steps.append(f"enrichment: {geocode_failures}/{len(geocode_tasks)} 个地点坐标补全失败")
 
     enriched_activities: dict[int, dict[int, dict]] = {}
     for gi, (di, ai) in enumerate(geocode_index):
@@ -84,6 +87,9 @@ async def _enrich_days(
             *(_weather_one(lat, lng, weather_key) for _, lat, lng in weather_tasks),
             return_exceptions=True,
         )
+        weather_failures = sum(1 for r in weather_results if not isinstance(r, dict))
+        if weather_failures > 0:
+            steps.append(f"enrichment: {weather_failures}/{len(weather_tasks)} 个城市天气查询失败")
 
     enriched_days: list = []
     for di, day in enumerate(days):
