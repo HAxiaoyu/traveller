@@ -17,3 +17,4 @@ class TravelPlannerState(TypedDict):
     slots_filled: bool
     missing_slots: list[str]
     follow_up_question: str
+    formatted_response: str

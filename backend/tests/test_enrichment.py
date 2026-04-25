@@ -141,6 +141,7 @@ def make_state(travel_plan=None, intermediate_steps=None, maps_key="", weather_k
         "slots_filled": True,
         "missing_slots": [],
         "follow_up_question": "",
+        "formatted_response": "",
     }
 
 

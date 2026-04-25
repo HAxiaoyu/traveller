@@ -23,6 +23,10 @@ class SessionDetail(SessionResponse):
     travel_plan: Optional[dict] = None
 
 
+class SessionUpdate(BaseModel):
+    title: Optional[str] = Field(default=None, max_length=200)
+
+
 class ChatRequest(BaseModel):
     message: str = Field(..., min_length=1)
     model_provider: str = Field(default="openai")

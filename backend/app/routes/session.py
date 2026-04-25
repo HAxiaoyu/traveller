@@ -4,7 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_session
 from app.models import Session
-from app.schemas import SessionCreate, SessionDetail, SessionResponse
+from app.schemas import SessionCreate, SessionDetail, SessionResponse, SessionUpdate
 
 router = APIRouter(prefix="/api")
 
@@ -50,3 +50,20 @@ async def delete_session(
         raise HTTPException(status_code=404, detail="会话不存在")
     await db.delete(ses)
     await db.commit()
+
+
+@router.patch("/session/{session_id}", response_model=SessionResponse)
+async def update_session(
+    session_id: str,
+    body: SessionUpdate,
+    db: AsyncSession = Depends(get_session),
+):
+    result = await db.execute(select(Session).where(Session.id == session_id))
+    ses = result.scalar_one_or_none()
+    if ses is None:
+        raise HTTPException(status_code=404, detail="会话不存在")
+    if body.title is not None:
+        ses.title = body.title
+    await db.commit()
+    await db.refresh(ses)
+    return ses

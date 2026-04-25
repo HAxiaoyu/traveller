@@ -109,6 +109,7 @@ def make_state(slots=None, intermediate_steps=None, travel_plan=None):
         "slots_filled": True,
         "missing_slots": [],
         "follow_up_question": "",
+        "formatted_response": "",
     }
 
 
@@ -264,6 +265,7 @@ async def test_main_graph_produces_travel_plan(mock_llm, mock_enrichment):
         "slots_filled": False,
         "missing_slots": [],
         "follow_up_question": "",
+        "formatted_response": "",
     }
 
     result = await graph.ainvoke(state)

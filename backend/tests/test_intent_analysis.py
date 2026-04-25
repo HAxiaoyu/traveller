@@ -28,6 +28,7 @@ def make_state(
         "slots_filled": slots_filled if slots_filled is not None else False,
         "missing_slots": missing_slots or [],
         "follow_up_question": follow_up_question or "",
+        "formatted_response": "",
     }
 
 
