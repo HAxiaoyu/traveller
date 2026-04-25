@@ -6,6 +6,7 @@ const DEFAULT_SETTINGS: Settings = {
   model_provider: 'openai',
   model_name: 'gpt-4o',
   api_key: '',
+  base_url: '',
   google_maps_key: '',
   weather_api_key: '',
 }
@@ -128,6 +129,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
             model_provider: settings.model_provider,
             model_name: settings.model_name,
             api_key: settings.api_key,
+            base_url: settings.base_url,
             google_maps_key: settings.google_maps_key,
             weather_api_key: settings.weather_api_key,
           }),

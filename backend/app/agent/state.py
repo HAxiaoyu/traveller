@@ -12,6 +12,7 @@ class TravelPlannerState(TypedDict):
     model_provider: str
     model_name: str
     api_key: str
+    base_url: str
     google_maps_key: str
     weather_api_key: str
     slots_filled: bool

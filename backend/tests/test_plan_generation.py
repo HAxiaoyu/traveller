@@ -106,6 +106,7 @@ def make_state(slots=None, intermediate_steps=None, travel_plan=None):
         "model_provider": "openai",
         "model_name": "gpt-4o",
         "api_key": "",
+        "base_url": "",
         "slots_filled": True,
         "missing_slots": [],
         "follow_up_question": "",

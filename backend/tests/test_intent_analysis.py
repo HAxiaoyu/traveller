@@ -25,6 +25,7 @@ def make_state(
         "model_provider": "openai",
         "model_name": "gpt-4o",
         "api_key": "",
+        "base_url": "",
         "slots_filled": slots_filled if slots_filled is not None else False,
         "missing_slots": missing_slots or [],
         "follow_up_question": follow_up_question or "",
@@ -417,3 +418,22 @@ def test_llm_factory_returns_anthropic():
     from langchain_anthropic import ChatAnthropic
 
     assert isinstance(model, ChatAnthropic)
+
+
+def test_llm_factory_returns_custom():
+    from app.agent.llm_factory import create_chat_model
+
+    model = create_chat_model(
+        "custom", "my-model", "sk-custom", base_url="https://custom.api/v1"
+    )
+    from langchain_openai import ChatOpenAI
+
+    assert isinstance(model, ChatOpenAI)
+    assert model.model_name == "my-model"
+
+
+def test_llm_factory_custom_missing_base_url():
+    from app.agent.llm_factory import create_chat_model
+
+    with pytest.raises(ValueError, match="自定义提供商需要填写 Base URL"):
+        create_chat_model("custom", "my-model", "sk-test")

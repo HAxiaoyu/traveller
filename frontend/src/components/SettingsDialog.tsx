@@ -14,6 +14,7 @@ const PROVIDERS: { label: string; value: string; defaultModel: string }[] = [
   { label: 'OpenAI', value: 'openai', defaultModel: 'gpt-4o' },
   { label: 'Anthropic', value: 'anthropic', defaultModel: 'claude-sonnet-4-6' },
   { label: '智谱 (Zhipu)', value: 'zhipu', defaultModel: 'glm-4' },
+  { label: '自定义 (OpenAI 兼容)', value: 'custom', defaultModel: '' },
 ]
 
 export function SettingsDialog({ open, onClose }: Props) {
@@ -43,6 +44,7 @@ export function SettingsDialog({ open, onClose }: Props) {
                 ...f,
                 model_provider: e.target.value,
                 model_name: provider?.defaultModel || f.model_name,
+                base_url: e.target.value !== 'custom' ? '' : f.base_url,
               }))
             }}
             className="w-full h-9 rounded-md border border-gray-300 bg-white px-3 text-sm focus:outline-none focus:ring-1 focus:ring-gray-400"
@@ -63,6 +65,17 @@ export function SettingsDialog({ open, onClose }: Props) {
             placeholder="gpt-4o / claude-sonnet-4-6"
           />
         </div>
+
+        {form.model_provider === 'custom' && (
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Base URL</label>
+            <Input
+              value={form.base_url}
+              onChange={(e) => setForm((f) => ({ ...f, base_url: e.target.value }))}
+              placeholder="https://your-api-endpoint/v1"
+            />
+          </div>
+        )}
 
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">API Key</label>

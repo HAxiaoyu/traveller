@@ -13,6 +13,7 @@ async def extract_slots(state: TravelPlannerState) -> dict:
         state.get("model_provider", "openai"),
         state.get("model_name", "gpt-4o"),
         state.get("api_key", ""),
+        state.get("base_url", ""),
     )
     slots: dict = dict(state.get("slots", {}))
     messages: list = list(state.get("messages", []))
@@ -22,11 +23,15 @@ async def extract_slots(state: TravelPlannerState) -> dict:
     )
 
     try:
-        response = await model.ainvoke([
-            SystemMessage(content=prompt),
-            HumanMessage(content="请从对话中提取用户最新一条消息中的旅行偏好信息。"),
-            *messages,
-        ])
+        response = await model.ainvoke(
+            [
+                SystemMessage(content=prompt),
+                HumanMessage(
+                    content="请从对话中提取用户最新一条消息中的旅行偏好信息。"
+                ),
+                *messages,
+            ]
+        )
         content: str = response.content
     except Exception:
         steps: list[str] = list(state.get("intermediate_steps", []))
@@ -51,7 +56,9 @@ async def extract_slots(state: TravelPlannerState) -> dict:
     if "interest" in merged:
         if "interests" in merged:
             if isinstance(merged["interest"], str):
-                merged["interests"] = list(merged["interests"]) + [merged.pop("interest")]
+                merged["interests"] = list(merged["interests"]) + [
+                    merged.pop("interest")
+                ]
             else:
                 merged.pop("interest")
         else:
@@ -61,7 +68,9 @@ async def extract_slots(state: TravelPlannerState) -> dict:
 
     steps: list[str] = list(state.get("intermediate_steps", []))
     if extracted:
-        steps.append(f"intent_analysis: 提取到偏好 → {json.dumps(extracted, ensure_ascii=False)}")
+        steps.append(
+            f"intent_analysis: 提取到偏好 → {json.dumps(extracted, ensure_ascii=False)}"
+        )
     else:
         steps.append("intent_analysis: 未从当前消息提取到新的偏好信息")
 

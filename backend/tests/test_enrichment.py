@@ -136,6 +136,7 @@ def make_state(travel_plan=None, intermediate_steps=None, maps_key="", weather_k
         "model_provider": "openai",
         "model_name": "gpt-4o",
         "api_key": "",
+        "base_url": "",
         "google_maps_key": maps_key,
         "weather_api_key": weather_key,
         "slots_filled": True,

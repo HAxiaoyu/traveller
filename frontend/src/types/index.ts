@@ -53,6 +53,7 @@ export interface Settings {
   model_provider: string
   model_name: string
   api_key: string
+  base_url: string
   google_maps_key: string
   weather_api_key: string
 }

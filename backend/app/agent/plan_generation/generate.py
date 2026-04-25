@@ -20,6 +20,7 @@ async def generate_plan(state: TravelPlannerState) -> dict:
         state.get("model_provider", "openai"),
         state.get("model_name", "gpt-4o"),
         state.get("api_key", ""),
+        state.get("base_url", ""),
     )
     slots: dict = state.get("slots", {})
     steps: list[str] = list(state.get("intermediate_steps", []))
