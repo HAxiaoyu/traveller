@@ -5,7 +5,7 @@ import { MapPanel } from './components/MapPanel'
 
 function AppLayout() {
   const { travelPlan, settings } = useApp()
-  const showMap = travelPlan && travelPlan.days.length > 0
+  const showMap = travelPlan && travelPlan.days.length > 0 && settings.google_maps_key
 
   return (
     <div className="flex h-screen overflow-hidden">

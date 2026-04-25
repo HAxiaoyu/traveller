@@ -6,6 +6,7 @@ PLAN_GENERATION_SYSTEM_PROMPT = """\
 ## 用户偏好
 - 目的地：{destination}
 - 天数：{days} 天
+- 出行时间：{travel_dates}
 - 兴趣标签：{interests}
 - 体力等级：{energy_level}
 

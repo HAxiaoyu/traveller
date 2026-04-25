@@ -14,6 +14,15 @@ from app.schemas import ChatRequest
 
 router = APIRouter(prefix="/api")
 
+_NODE_LABELS: dict[str, str] = {
+    "extract_slots": "intent_analysis: 正在分析出行偏好...",
+    "check_slots": "intent_analysis: 正在检查信息完整性...",
+    "generate_question": "intent_analysis: 正在生成追问...",
+    "plan_generation": "plan_generation: 正在调用 AI 生成行程方案...",
+    "enrichment": "enrichment: 正在获取坐标和天气信息...",
+    "format_response": "format_response: 正在整理回复...",
+}
+
 
 def _derive_title(message: str, slots: dict) -> str:
     destination: str = slots.get("destination", "")
@@ -62,11 +71,31 @@ async def event_stream(session_id: str, body: ChatRequest, db: AsyncSession):
 
         last_step_count = 0
         accumulated_state = dict(state)
+        current_phase_key = ""
 
         async for event in graph.astream_events(state, version="v1"):
-            if event.get("event") != "on_chain_end":
+            kind = event.get("event", "")
+            name = event.get("name", "")
+
+            # 节点开始执行时立即推送状态
+            if kind == "on_chain_start" and name in _NODE_LABELS:
+                label = _NODE_LABELS[name]
+                current_phase_key = label.split(":")[0]
+                yield f"event: status\ndata: {json.dumps({'content': label})}\n\n"
                 continue
-            if event.get("name") == "LangGraph":
+
+            # LLM token 流式推送
+            if kind == "on_chat_model_stream":
+                chunk = event.get("data", {}).get("chunk")
+                if chunk is not None:
+                    text = chunk.content if hasattr(chunk, "content") else str(chunk)
+                    if text:
+                        yield f"event: token\ndata: {json.dumps({'content': text})}\n\n"
+                continue
+
+            if kind != "on_chain_end":
+                continue
+            if name == "LangGraph":
                 continue
             output = event.get("data", {}).get("output", {})
             if not isinstance(output, dict):

@@ -25,10 +25,20 @@ interface MarkerData {
 export const MapPanel: FC<Props> = ({ plan, googleMapsKey, highlightedDay }) => {
   const [selected, setSelected] = useState<MarkerData | null>(null)
 
+  // 仅在提供了有效 API Key 时加载 Google Maps
+  const shouldLoad = !!googleMapsKey
   const { isLoaded } = useJsApiLoader({
-    googleMapsApiKey: googleMapsKey || 'AIzaSyD-dummy-placeholder-key',
+    googleMapsApiKey: googleMapsKey || '',
     libraries: [],
   })
+
+  if (!shouldLoad) {
+    return (
+      <div className="h-full flex items-center justify-center text-sm text-gray-400 text-center px-4">
+        请在设置中配置 Google Maps API Key 以查看路线地图
+      </div>
+    )
+  }
 
   const { markers, dayPaths } = useMemo(() => {
     const m: MarkerData[] = []
@@ -61,7 +71,7 @@ export const MapPanel: FC<Props> = ({ plan, googleMapsKey, highlightedDay }) => 
   }, [plan])
 
   const bounds = useMemo(() => {
-    if (markers.length === 0) return undefined
+    if (markers.length === 0 || typeof google === 'undefined' || !google.maps?.LatLngBounds) return undefined
     const b = new google.maps.LatLngBounds()
     for (const m of markers) b.extend({ lat: m.lat, lng: m.lng })
     return b

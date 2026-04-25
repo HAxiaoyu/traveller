@@ -44,14 +44,16 @@ async def _enrich_days(
 
     geocode_results: list = []
     if geocode_tasks and maps_key:
-        steps.append(f"enrichment: 正在补全 {len(geocode_tasks)} 个地点的坐标...")
+        steps.append(f"enrichment: 正在通过 Google Maps API 补全 {len(geocode_tasks)} 个地点的坐标...")
+        for di, ai, addr in geocode_tasks:
+            steps.append(f"enrichment:   → 查询「{addr}」的地理坐标")
         geocode_results = await asyncio.gather(
             *(_geocode_one(addr, maps_key) for _, _, addr in geocode_tasks),
             return_exceptions=True,
         )
         geocode_failures = sum(1 for r in geocode_results if not isinstance(r, dict))
         if geocode_failures > 0:
-            steps.append(f"enrichment: {geocode_failures}/{len(geocode_tasks)} 个地点坐标补全失败")
+            steps.append(f"enrichment: ⚠ {geocode_failures}/{len(geocode_tasks)} 个地点坐标查询失败")
 
     enriched_activities: dict[int, dict[int, dict]] = {}
     for gi, (di, ai) in enumerate(geocode_index):
@@ -82,14 +84,17 @@ async def _enrich_days(
 
     weather_results: list = []
     if weather_tasks and weather_key:
-        steps.append(f"enrichment: 正在查询 {len(weather_tasks)} 个城市的天气...")
+        steps.append(f"enrichment: 正在通过 OpenWeather API 查询 {len(weather_tasks)} 个城市的天气...")
+        for di, lat, lng in weather_tasks:
+            city_name = days[di].get("city", f"day{di+1}")
+            steps.append(f"enrichment:   → 查询「{city_name}」的天气情况")
         weather_results = await asyncio.gather(
             *(_weather_one(lat, lng, weather_key) for _, lat, lng in weather_tasks),
             return_exceptions=True,
         )
         weather_failures = sum(1 for r in weather_results if not isinstance(r, dict))
         if weather_failures > 0:
-            steps.append(f"enrichment: {weather_failures}/{len(weather_tasks)} 个城市天气查询失败")
+            steps.append(f"enrichment: ⚠ {weather_failures}/{len(weather_tasks)} 个城市天气查询失败")
 
     enriched_days: list = []
     for di, day in enumerate(days):

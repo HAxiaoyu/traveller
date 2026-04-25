@@ -7,7 +7,7 @@ import { SettingsDialog } from './SettingsDialog'
 import { ProcessMonitor } from './ProcessMonitor'
 
 export function ChatArea() {
-  const { currentSessionId, messages, loading, intermediateSteps, sendMessage } = useApp()
+  const { currentSessionId, messages, loading, intermediateSteps, streamingContent, sendMessage } = useApp()
   const [input, setInput] = useState('')
   const [showSettings, setShowSettings] = useState(false)
   const bottomRef = useRef<HTMLDivElement>(null)
@@ -69,7 +69,13 @@ export function ChatArea() {
           <ProcessMonitor steps={intermediateSteps} />
         )}
 
-        {loading && intermediateSteps.length === 0 && (
+        {loading && streamingContent && (
+          <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 text-xs text-gray-600 font-mono whitespace-pre-wrap break-words max-h-48 overflow-y-auto">
+            {streamingContent}
+          </div>
+        )}
+
+        {loading && intermediateSteps.length === 0 && !streamingContent && (
           <div className="flex items-center gap-2 text-gray-400 text-sm">
             <Loader2 className="w-4 h-4 animate-spin" />
             正在分析您的偏好...

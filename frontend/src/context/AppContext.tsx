@@ -19,6 +19,7 @@ interface AppState {
   loading: boolean
   travelPlan: TravelPlan | null
   intermediateSteps: string[]
+  streamingContent: string
   createSession: () => Promise<void>
   deleteSession: (id: string) => Promise<void>
   switchSession: (id: string) => Promise<void>
@@ -54,6 +55,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(false)
   const [travelPlan, setTravelPlan] = useState<TravelPlan | null>(null)
   const [intermediateSteps, setIntermediateSteps] = useState<string[]>([])
+  const [streamingContent, setStreamingContent] = useState('')
   const [settings, setSettings] = useLocalStorage<Settings>('traveller_settings', DEFAULT_SETTINGS)
 
   const loadSessions = useCallback(async () => {
@@ -116,6 +118,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (!currentSessionId || !content.trim()) return
       setLoading(true)
       setIntermediateSteps([])
+      setStreamingContent('')
 
       const userMsg: Message = { role: 'user', content }
       setMessages((prev) => [...prev, userMsg])
@@ -161,6 +164,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
           for (const evt of events) {
             if (evt.type === 'status') {
               setIntermediateSteps((prev) => [...prev, evt.payload.content as string])
+            } else if (evt.type === 'token') {
+              setStreamingContent((prev) => prev + (evt.payload.content as string))
             } else if (evt.type === 'done') {
               assistantContent = (evt.payload.content as string) || assistantContent
               if (evt.payload.travel_plan) {
@@ -211,6 +216,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         loading,
         travelPlan,
         intermediateSteps,
+        streamingContent,
         createSession,
         deleteSession,
         switchSession,

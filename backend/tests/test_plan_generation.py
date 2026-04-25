@@ -257,7 +257,7 @@ async def test_main_graph_produces_travel_plan(mock_llm, mock_enrichment):
     graph = build_agent_graph()
     state = {
         "messages": [HumanMessage(content="ok")],
-        "slots": {"destination": "东京", "days": 7, "interests": ["美食"]},
+        "slots": {"destination": "东京", "days": 7, "interests": ["美食"], "travel_dates": "5月"},
         "travel_plan": None,
         "intermediate_steps": [],
         "model_provider": "openai",

@@ -29,6 +29,7 @@ async def generate_plan(state: TravelPlannerState) -> dict:
     days: int = slots.get("days", 3)
     interests: list = slots.get("interests", [])
     energy_level: str = slots.get("energy_level", "适中")
+    travel_dates: str = slots.get("travel_dates", "")
     min_act, max_act = ACTIVITY_COUNTS.get(energy_level, (4, 5))
 
     steps.append(
@@ -37,6 +38,7 @@ async def generate_plan(state: TravelPlannerState) -> dict:
     prompt = PLAN_GENERATION_SYSTEM_PROMPT.format(
         destination=destination,
         days=days,
+        travel_dates=travel_dates,
         interests="、".join(interests) if interests else "不限",
         energy_level=energy_level,
         min_activities=min_act,

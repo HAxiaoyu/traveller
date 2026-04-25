@@ -1,6 +1,6 @@
 from app.agent.state import TravelPlannerState
 
-REQUIRED_SLOTS = ("destination", "days", "interests")
+REQUIRED_SLOTS = ("destination", "days", "interests", "travel_dates")
 
 
 async def check_slots(state: TravelPlannerState) -> dict:

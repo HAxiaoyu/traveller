@@ -37,7 +37,7 @@ def make_state(
 async def test_check_slots_all_filled():
     from app.agent.intent_analysis.check_slots import check_slots
 
-    state = make_state(slots={"destination": "东京", "days": 7, "interests": ["美食"]})
+    state = make_state(slots={"destination": "东京", "days": 7, "interests": ["美食"], "travel_dates": "5月"})
     result = await check_slots(state)
 
     assert result["slots_filled"] is True
@@ -55,6 +55,7 @@ async def test_check_slots_energy_already_set():
             "days": 5,
             "interests": ["自然"],
             "energy_level": "轻松",
+            "travel_dates": "5月",
         }
     )
     result = await check_slots(state)
@@ -83,7 +84,7 @@ async def test_check_slots_missing_multiple():
     result = await check_slots(state)
 
     assert result["slots_filled"] is False
-    assert len(result["missing_slots"]) == 3
+    assert len(result["missing_slots"]) == 4
     assert "destination" in result["missing_slots"]
     assert "days" in result["missing_slots"]
     assert "interests" in result["missing_slots"]
@@ -254,7 +255,7 @@ async def test_subgraph_slots_complete_exits(mock_llm):
     subgraph = build_intent_analysis_subgraph()
     state = make_state(
         messages=[HumanMessage(content="ok")],
-        slots={"destination": "东京", "days": 7, "interests": ["美食", "自然"]},
+        slots={"destination": "东京", "days": 7, "interests": ["美食", "自然"], "travel_dates": "5月"},
     )
 
     result = await subgraph.ainvoke(state)
@@ -312,7 +313,7 @@ async def test_main_graph_routes_to_planning_when_slots_complete(mock_llm, mock_
     graph = build_agent_graph()
     state = make_state(
         messages=[HumanMessage(content="ok")],
-        slots={"destination": "东京", "days": 7, "interests": ["美食"]},
+        slots={"destination": "东京", "days": 7, "interests": ["美食"], "travel_dates": "5月"},
     )
 
     result = await graph.ainvoke(state)
