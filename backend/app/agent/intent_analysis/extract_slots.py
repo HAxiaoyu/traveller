@@ -1,4 +1,5 @@
 import json
+import re
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.language_models import BaseChatModel
@@ -6,6 +7,47 @@ from langchain_core.language_models import BaseChatModel
 from app.agent.intent_analysis.prompts import EXTRACT_SLOTS_SYSTEM_PROMPT
 from app.agent.llm_factory import create_chat_model
 from app.agent.state import TravelPlannerState
+
+# CJK Unified Ideographs range
+_CJK_RANGE = chr(0x4e00) + "-" + chr(0x9fff)
+
+
+def _extract_json(text: str) -> dict | None:
+    """从 LLM 回复中提取 JSON 对象，兼容 markdown 包裹和前导文字。"""
+    text = text.strip()
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        pass
+    block_match = re.search(r'```(?:json)?\s*\n?(.*?)\n?```', text, re.DOTALL)
+    if block_match:
+        try:
+            return json.loads(block_match.group(1).strip())
+        except json.JSONDecodeError:
+            pass
+    brace_match = re.search(r'\{.*?\}', text, re.DOTALL)
+    if brace_match:
+        try:
+            return json.loads(brace_match.group(0))
+        except json.JSONDecodeError:
+            pass
+    return None
+
+
+def _extract_from_message(text: str) -> dict:
+    """纯文本规则兜底：从用户消息中提取目的地。"""
+    result: dict = {}
+    patterns = [
+        (rf"去([{_CJK_RANGE}]{{2,6}}?)(?:玩|旅游|度假|旅行|的|$)", "destination"),
+        (rf"到([{_CJK_RANGE}]{{2,6}}?)(?:玩|旅游|度假|旅行|去|$)", "destination"),
+        (rf"在([{_CJK_RANGE}]{{2,6}}?)(?:玩|旅游|度假|旅行|$)", "destination"),
+    ]
+    for pattern, key in patterns:
+        m = re.search(pattern, text)
+        if m:
+            result[key] = m.group(1).strip()
+            break
+    return result
 
 
 async def extract_slots(state: TravelPlannerState) -> dict:
@@ -32,15 +74,20 @@ async def extract_slots(state: TravelPlannerState) -> dict:
                 *messages,
             ]
         )
-        content: str = response.content
+        content: str = response.content if isinstance(response.content, str) else str(response.content)
     except Exception:
         steps: list[str] = list(state.get("intermediate_steps", []))
         steps.append("intent_analysis: LLM 调用失败，跳过偏好提取")
         return {"slots": slots, "intermediate_steps": steps}
 
-    try:
-        extracted: dict = json.loads(content)
-    except (json.JSONDecodeError, TypeError):
+    extracted: dict | None = _extract_json(content)
+    if extracted is None:
+        user_text = " ".join(
+            m.content for m in messages if hasattr(m, "content") and isinstance(m.content, str)
+        )
+        extracted = _extract_from_message(user_text)
+
+    if not extracted:
         steps: list[str] = list(state.get("intermediate_steps", []))
         steps.append("intent_analysis: 未从当前消息提取到新的偏好信息")
         return {"slots": slots, "intermediate_steps": steps}

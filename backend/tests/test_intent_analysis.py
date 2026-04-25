@@ -182,7 +182,8 @@ async def test_extract_slots_invalid_json(mock_llm):
     )
     result = await extract_slots(state)
 
-    assert result["slots"] == {}
+    # 即使 LLM 返回无效 JSON，兜底规则也能从"想去日本"中提取目的地
+    assert result["slots"].get("destination") == "日本"
 
 
 @pytest.mark.asyncio
@@ -437,3 +438,50 @@ def test_llm_factory_custom_missing_base_url():
 
     with pytest.raises(ValueError, match="自定义提供商需要填写 Base URL"):
         create_chat_model("custom", "my-model", "sk-test")
+
+
+# ═══════════════════════════════════════════════════════════════
+# extract_slots 辅助函数
+# ═══════════════════════════════════════════════════════════════
+
+
+def test_extract_json_direct():
+    from app.agent.intent_analysis.extract_slots import _extract_json
+
+    result = _extract_json('{"destination": "东京"}')
+    assert result == {"destination": "东京"}
+
+
+def test_extract_json_with_markdown_fence():
+    from app.agent.intent_analysis.extract_slots import _extract_json
+
+    result = _extract_json('```json\n{"destination": "大阪"}\n```')
+    assert result == {"destination": "大阪"}
+
+
+def test_extract_json_with_leading_text():
+    from app.agent.intent_analysis.extract_slots import _extract_json
+
+    result = _extract_json('提取到以下信息：\n{"destination": "札幌"}')
+    assert result == {"destination": "札幌"}
+
+
+def test_extract_json_invalid():
+    from app.agent.intent_analysis.extract_slots import _extract_json
+
+    assert _extract_json("不是 json") is None
+
+
+def test_extract_from_message_destination():
+    from app.agent.intent_analysis.extract_slots import _extract_from_message
+
+    assert _extract_from_message("我想去日本") == {"destination": "日本"}
+    assert _extract_from_message("到京都玩") == {"destination": "京都"}
+    assert _extract_from_message("在东京") == {"destination": "东京"}
+
+
+def test_extract_from_message_no_match():
+    from app.agent.intent_analysis.extract_slots import _extract_from_message
+
+    assert _extract_from_message("你好") == {}
+    assert _extract_from_message("推荐一下景点") == {}
