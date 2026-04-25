@@ -31,6 +31,9 @@ async def generate_plan(state: TravelPlannerState) -> dict:
     energy_level: str = slots.get("energy_level", "适中")
     min_act, max_act = ACTIVITY_COUNTS.get(energy_level, (4, 5))
 
+    steps.append(
+        f"plan_generation: 正在为 {destination}{days}日游生成行程方案（{energy_level}强度）"
+    )
     prompt = PLAN_GENERATION_SYSTEM_PROMPT.format(
         destination=destination,
         days=days,

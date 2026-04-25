@@ -1,9 +1,10 @@
 import { useState, useRef, useEffect } from 'react'
-import { Send, Loader2, Settings, Check, Circle } from 'lucide-react'
+import { Send, Loader2, Settings } from 'lucide-react'
 import { useApp } from '../context/AppContext'
 import { Button } from './ui/button'
 import { MessageBubble } from './MessageBubble'
 import { SettingsDialog } from './SettingsDialog'
+import { ProcessMonitor } from './ProcessMonitor'
 
 export function ChatArea() {
   const { currentSessionId, messages, loading, intermediateSteps, sendMessage } = useApp()
@@ -65,27 +66,13 @@ export function ChatArea() {
         ))}
 
         {loading && intermediateSteps.length > 0 && (
-          <div className="bg-gray-50 rounded-lg px-3 py-2 text-xs space-y-1">
-            {intermediateSteps.map((step, i) => {
-              const isLast = i === intermediateSteps.length - 1
-              return (
-                <div key={i} className="flex items-center gap-1.5 text-gray-500">
-                  {isLast ? (
-                    <Loader2 className="w-3 h-3 animate-spin text-blue-500" />
-                  ) : (
-                    <Check className="w-3 h-3 text-green-500" />
-                  )}
-                  <span>{step}</span>
-                </div>
-              )
-            })}
-          </div>
+          <ProcessMonitor steps={intermediateSteps} />
         )}
 
         {loading && intermediateSteps.length === 0 && (
           <div className="flex items-center gap-2 text-gray-400 text-sm">
             <Loader2 className="w-4 h-4 animate-spin" />
-            正在思考...
+            正在分析您的偏好...
           </div>
         )}
 

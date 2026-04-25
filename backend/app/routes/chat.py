@@ -60,10 +60,24 @@ async def event_stream(session_id: str, body: ChatRequest, db: AsyncSession):
             "formatted_response": "",
         }
 
-        final_state = await graph.ainvoke(state)
+        last_step_count = 0
+        accumulated_state = dict(state)
 
-        for step in final_state.get("intermediate_steps", []):
-            yield f"event: status\ndata: {json.dumps({'content': step})}\n\n"
+        async for event in graph.astream_events(state, version="v1"):
+            if event.get("event") != "on_chain_end":
+                continue
+            if event.get("name") == "LangGraph":
+                continue
+            output = event.get("data", {}).get("output", {})
+            if not isinstance(output, dict):
+                continue
+            accumulated_state.update(output)
+            steps: list[str] = accumulated_state.get("intermediate_steps", [])
+            for step in steps[last_step_count:]:
+                yield f"event: status\ndata: {json.dumps({'content': step})}\n\n"
+            last_step_count = len(steps)
+
+        final_state = accumulated_state
 
         formatted = final_state.get("formatted_response", "")
         ai_content: str
