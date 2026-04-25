@@ -1,6 +1,21 @@
 import json
+from contextlib import asynccontextmanager
 
 import pytest
+from httpx import AsyncClient
+from httpx_ws import aconnect_ws
+from httpx_ws.transport import ASGIWebSocketTransport
+
+from app.main import app
+
+
+@asynccontextmanager
+async def ws_connect(path: str):
+    """Create an async WebSocket connection to the test app."""
+    transport = ASGIWebSocketTransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        async with aconnect_ws(f"http://test{path}", client=client) as ws:
+            yield ws
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -90,51 +105,58 @@ async def test_get_nonexistent_session(client):
 
 
 # ═══════════════════════════════════════════════════════════════
-# SSE 聊天（Agent 流水线核心验证）
+# WebSocket 聊天（Agent 流水线核心验证）
 # ═══════════════════════════════════════════════════════════════
 
 
+async def _ws_collect(ws, timeout=10.0):
+    """从 WebSocket 接收所有事件，直到 done/error 事件。返回 (status列表, done事件或None, error事件或None)"""
+    import asyncio
+
+    status_msgs: list[str] = []
+    done = None
+    error = None
+
+    deadline = asyncio.get_event_loop().time() + timeout
+    while asyncio.get_event_loop().time() < deadline:
+        data = await ws.receive_json()
+        t = data.get("type")
+        if t == "status":
+            status_msgs.append(data.get("content", ""))
+        elif t == "done":
+            done = data
+            break
+        elif t == "error":
+            error = data
+            break
+    return status_msgs, done, error
+
+
 @pytest.mark.asyncio
-async def test_chat_sse_streams_status_events(client, mock_llm):
-    """SSE 聊天 → 槽位不完整时输出追问流程"""
+async def test_chat_ws_streams_status_events(client, mock_llm):
+    """WebSocket 聊天 → 槽位不完整时输出追问流程"""
     mock_llm.ainvoke.return_value.content = "您想去哪里旅行呢？"
 
     r = await client.post("/api/session", json={})
     sid = r.json()["id"]
 
-    r = await client.post(
-        f"/api/chat/{sid}",
-        json={"message": "你好"},
-        timeout=10,
-    )
-    assert r.status_code == 200
+    async with ws_connect(f"/api/ws/chat/{sid}") as ws:
+        await ws.send_json({"type": "chat", "message": "你好"})
+        status_msgs, done, error = await _ws_collect(ws)
 
-    lines = [ln for ln in r.text.strip().split("\n") if ln]
-    events = []
-    for i in range(0, len(lines), 2):
-        event_line = lines[i]
-        data_line = lines[i + 1]
-        evt_type = event_line.replace("event: ", "")
-        payload = json.loads(data_line.replace("data: ", ""))
-        events.append((evt_type, payload))
-
-    assert len(events) > 3, f"期望至少 4 个事件，实际 {len(events)}"
-
-    status_contents = [e[1]["content"] for e in events if e[0] == "status"]
-
-    assert any("正在分析您的偏好" in c for c in status_contents)
-    assert any("未从当前消息提取到新的偏好信息" in c for c in status_contents)
-    assert any("槽位不完整" in c for c in status_contents)
-    assert any("追问" in c for c in status_contents)
-    done_events = [e for e in events if e[0] == "done"]
-    assert len(done_events) == 1
-    assert "您想去哪里旅行呢" in done_events[0][1]["content"]
-    assert done_events[0][1]["slots_filled"] is False
+    assert error is None
+    assert any("正在分析您的偏好" in c for c in status_msgs)
+    assert any("未从当前消息提取到新的偏好信息" in c for c in status_msgs)
+    assert any("槽位不完整" in c for c in status_msgs)
+    assert any("追问" in c for c in status_msgs)
+    assert done is not None
+    assert "您想去哪里旅行呢" in done.get("content", "")
+    assert done.get("slots_filled") is False
 
 
 @pytest.mark.asyncio
-async def test_chat_sse_slots_complete_triggers_planning(client, mock_llm, mock_enrichment):
-    """SSE 聊天 → 槽位完整时进入行程规划流水线"""
+async def test_chat_ws_slots_complete_triggers_planning(client, mock_llm, mock_enrichment):
+    """WebSocket 聊天 → 槽位完整时进入行程规划流水线"""
     from unittest.mock import MagicMock
 
     slots_r = MagicMock()
@@ -171,44 +193,32 @@ async def test_chat_sse_slots_complete_triggers_planning(client, mock_llm, mock_
     r = await client.post("/api/session", json={})
     sid = r.json()["id"]
 
-    r = await client.post(
-        f"/api/chat/{sid}",
-        json={"message": "想去东京7天美食之旅"},
-        timeout=10,
-    )
-    assert r.status_code == 200
+    async with ws_connect(f"/api/ws/chat/{sid}") as ws:
+        await ws.send_json({"type": "chat", "message": "想去东京7天美食之旅"})
+        status_msgs, done, error = await _ws_collect(ws)
 
-    lines = [ln for ln in r.text.strip().split("\n") if ln]
-    events = []
-    for i in range(0, len(lines), 2):
-        event_line = lines[i]
-        data_line = lines[i + 1]
-        evt_type = event_line.replace("event: ", "")
-        payload = json.loads(data_line.replace("data: ", ""))
-        events.append((evt_type, payload))
-
-    # 应该包含 plan_generation, enrichment, format_response
-    steps_text = " ".join(e[1]["content"] for e in events if e[0] == "status")
+    assert error is None
+    steps_text = " ".join(status_msgs)
     assert "plan_generation" in steps_text
     assert "enrichment" in steps_text
     assert "format_response" in steps_text
 
-    # done 事件应包含 travel_plan
-    done_events = [e for e in events if e[0] == "done"]
-    assert len(done_events) == 1
-    assert done_events[0][1]["travel_plan"] is not None
-    assert done_events[0][1]["travel_plan"]["title"] == "东京美食之旅"
+    assert done is not None
+    assert done.get("travel_plan") is not None
+    assert done["travel_plan"]["title"] == "东京美食之旅"
 
 
 @pytest.mark.asyncio
-async def test_chat_sse_persists_messages(client, mock_llm):
+async def test_chat_ws_persists_messages(client, mock_llm):
     """聊天后刷新会话详情 → 应看到 user + assistant 两条消息"""
     mock_llm.ainvoke.return_value.content = "您想去哪里旅行呢？"
 
     r = await client.post("/api/session", json={})
     sid = r.json()["id"]
 
-    await client.post(f"/api/chat/{sid}", json={"message": "Hello"}, timeout=10)
+    async with ws_connect(f"/api/ws/chat/{sid}") as ws:
+        await ws.send_json({"type": "chat", "message": "Hello"})
+        await _ws_collect(ws)
 
     r = await client.get(f"/api/session/{sid}")
     data = r.json()
@@ -220,27 +230,27 @@ async def test_chat_sse_persists_messages(client, mock_llm):
 
 
 @pytest.mark.asyncio
-async def test_chat_nonexistent_session_returns_error(client):
-    """向不存在的会话发消息 → SSE error 事件"""
-    r = await client.post(
-        "/api/chat/00000000-0000-0000-0000-000000000000",
-        json={"message": "Hello"},
-        timeout=10,
-    )
-    assert r.status_code == 200  # SSE 连接本身成功
-    assert "event: error" in r.text
-    payload = json.loads(r.text.split("\n")[1].replace("data: ", ""))
-    assert "会话不存在" in payload["content"]
+async def test_chat_ws_nonexistent_session_returns_error(client):
+    """向不存在的会话发消息 → WebSocket error 事件"""
+    async with ws_connect("/api/ws/chat/00000000-0000-0000-0000-000000000000") as ws:
+        await ws.send_json({"type": "chat", "message": "Hello"})
+        _, _, error = await _ws_collect(ws)
+
+    assert error is not None
+    assert "会话不存在" in error.get("content", "")
 
 
 @pytest.mark.asyncio
-async def test_chat_empty_message_rejected(client):
-    """空消息 → 422 校验失败"""
+async def test_chat_ws_empty_message_rejected(client):
+    """空消息 → error 事件"""
     r = await client.post("/api/session", json={})
     sid = r.json()["id"]
 
-    r = await client.post(f"/api/chat/{sid}", json={"message": ""})
-    assert r.status_code == 422
+    async with ws_connect(f"/api/ws/chat/{sid}") as ws:
+        await ws.send_json({"type": "chat", "message": ""})
+        data = await ws.receive_json()
+
+    assert data["type"] == "error"
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -605,11 +615,9 @@ async def test_chat_auto_title_from_first_message(client, mock_llm):
     r = await client.post("/api/session", json={})
     sid = r.json()["id"]
 
-    await client.post(
-        f"/api/chat/{sid}",
-        json={"message": "想去东京吃美食"},
-        timeout=10,
-    )
+    async with ws_connect(f"/api/ws/chat/{sid}") as ws:
+        await ws.send_json({"type": "chat", "message": "想去东京吃美食"})
+        await _ws_collect(ws)
 
     r = await client.get(f"/api/session/{sid}")
     title = r.json()["title"]

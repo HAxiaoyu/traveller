@@ -1,16 +1,14 @@
 import json
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends
-from fastapi.responses import StreamingResponse
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from langchain_core.messages import HumanMessage
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agent.graph import build_agent_graph
-from app.database import get_session
+from app.database import async_session
 from app.models import Session
-from app.schemas import ChatRequest
 
 router = APIRouter(prefix="/api")
 
@@ -37,127 +35,153 @@ def _derive_title(message: str, slots: dict) -> str:
     return clean or "新规划"
 
 
-async def event_stream(session_id: str, body: ChatRequest, db: AsyncSession):
-    result = await db.execute(select(Session).where(Session.id == session_id))
-    session = result.scalar_one_or_none()
-    if session is None:
-        yield f"event: error\ndata: {json.dumps({'content': '会话不存在'})}\n\n"
+def _hint_from_error(err_msg: str) -> str:
+    lower = err_msg.lower()
+    if "api_key" in lower or "unauthorized" in lower or "invalid" in lower:
+        return "API Key 无效或未配置，请在设置中检查。"
+    if "timeout" in lower or "timed out" in lower:
+        return "请求超时，请稍后重试。"
+    return "处理您的请求时遇到问题，请稍后重试。"
+
+
+async def _build_ai_content(final_state: dict, default_message: str) -> str:
+    formatted = final_state.get("formatted_response", "")
+    if formatted:
+        return formatted
+    if final_state.get("slots_filled"):
+        travel_plan = final_state.get("travel_plan")
+        if travel_plan and travel_plan.get("days"):
+            return f"已为您规划好 {travel_plan['title']}，共 {len(travel_plan['days'])} 天行程，请查看。"
+        return f"收到您的消息：「{default_message}」\n\nAgent 流水线已就绪，各节点执行完毕。"
+    return final_state.get("follow_up_question", "请告诉我更多关于您旅行的偏好。")
+
+
+async def _send(websocket: WebSocket, data: dict) -> bool:
+    """发送消息到 WebSocket，连接断开时返回 False。"""
+    try:
+        await websocket.send_json(data)
+        return True
+    except WebSocketDisconnect:
+        return False
+
+
+@router.websocket("/ws/chat/{session_id}")
+async def chat_websocket(websocket: WebSocket, session_id: str):
+    await websocket.accept()
+    try:
+        raw = await websocket.receive_json()
+    except WebSocketDisconnect:
         return
 
-    user_msg = {"role": "user", "content": body.message}
-    messages: list = list(session.messages)
-    messages.append(user_msg)
+    if raw.get("type") != "chat":
+        await websocket.send_json({"type": "error", "content": "无效的消息类型"})
+        return
 
-    yield f"event: status\ndata: {json.dumps({'content': '正在分析您的偏好...'})}\n\n"
+    message: str = (raw.get("message") or "").strip()
+    if not message:
+        await websocket.send_json({"type": "error", "content": "消息不能为空"})
+        return
 
-    try:
-        graph = build_agent_graph()
-        state = {
-            "messages": [HumanMessage(content=body.message)],
-            "slots": session.slots or {},
-            "travel_plan": None,
-            "intermediate_steps": [],
-            "model_provider": body.model_provider,
-            "model_name": body.model_name,
-            "api_key": body.api_key,
-            "base_url": body.base_url,
-            "google_maps_key": body.google_maps_key,
-            "weather_api_key": body.weather_api_key,
-            "slots_filled": False,
-            "missing_slots": [],
-            "follow_up_question": "",
-            "formatted_response": "",
-        }
+    async with async_session() as db:
+        result = await db.execute(select(Session).where(Session.id == session_id))
+        session = result.scalar_one_or_none()
+        if session is None:
+            await websocket.send_json({"type": "error", "content": "会话不存在"})
+            return
 
-        last_step_count = 0
-        accumulated_state = dict(state)
-        current_phase_key = ""
+        user_msg = {"role": "user", "content": message}
+        messages: list = list(session.messages)
+        messages.append(user_msg)
 
-        async for event in graph.astream_events(state, version="v1"):
-            kind = event.get("event", "")
-            name = event.get("name", "")
+        ok = await _send(websocket, {"type": "status", "content": "正在分析您的偏好..."})
+        if not ok:
+            return
 
-            # 节点开始执行时立即推送状态
-            if kind == "on_chain_start" and name in _NODE_LABELS:
-                label = _NODE_LABELS[name]
-                current_phase_key = label.split(":")[0]
-                yield f"event: status\ndata: {json.dumps({'content': label})}\n\n"
-                continue
+        try:
+            graph = build_agent_graph()
+            state = {
+                "messages": [HumanMessage(content=message)],
+                "slots": session.slots or {},
+                "travel_plan": None,
+                "intermediate_steps": [],
+                "model_provider": raw.get("model_provider", "openai"),
+                "model_name": raw.get("model_name", "gpt-4o"),
+                "api_key": raw.get("api_key", ""),
+                "base_url": raw.get("base_url", ""),
+                "google_maps_key": raw.get("google_maps_key", ""),
+                "weather_api_key": raw.get("weather_api_key", ""),
+                "slots_filled": False,
+                "missing_slots": [],
+                "follow_up_question": "",
+                "formatted_response": "",
+            }
 
-            # LLM token 流式推送
-            if kind == "on_chat_model_stream":
-                chunk = event.get("data", {}).get("chunk")
-                if chunk is not None:
-                    text = chunk.content if hasattr(chunk, "content") else str(chunk)
-                    if text:
-                        yield f"event: token\ndata: {json.dumps({'content': text})}\n\n"
-                continue
+            last_step_count = 0
+            accumulated_state = dict(state)
+            current_phase_key = ""
+            disconnected = False
 
-            if kind != "on_chain_end":
-                continue
-            if name == "LangGraph":
-                continue
-            output = event.get("data", {}).get("output", {})
-            if not isinstance(output, dict):
-                continue
-            accumulated_state.update(output)
-            steps: list[str] = accumulated_state.get("intermediate_steps", [])
-            for step in steps[last_step_count:]:
-                yield f"event: status\ndata: {json.dumps({'content': step})}\n\n"
-            last_step_count = len(steps)
+            async for event in graph.astream_events(state, version="v1"):
+                kind = event.get("event", "")
+                name = event.get("name", "")
 
-        final_state = accumulated_state
+                if kind == "on_chain_start" and name in _NODE_LABELS:
+                    label = _NODE_LABELS[name]
+                    current_phase_key = label.split(":")[0]
+                    if not disconnected:
+                        ok = await _send(websocket, {"type": "status", "content": label})
+                        if not ok:
+                            disconnected = True
+                    continue
 
-        formatted = final_state.get("formatted_response", "")
-        ai_content: str
-        if formatted:
-            ai_content = formatted
-        elif final_state.get("slots_filled"):
-            travel_plan = final_state.get("travel_plan")
-            if travel_plan and travel_plan.get("days"):
-                day_count = len(travel_plan["days"])
-                ai_content = f"已为您规划好 {travel_plan['title']}，共 {day_count} 天行程，请查看。"
-            else:
-                ai_content = f"收到您的消息：「{body.message}」\n\nAgent 流水线已就绪，各节点执行完毕。"
-        else:
-            question = final_state.get("follow_up_question", "请告诉我更多关于您旅行的偏好。")
-            ai_content = question
+                if kind == "on_chat_model_stream" and not disconnected:
+                    chunk = event.get("data", {}).get("chunk")
+                    if chunk is not None:
+                        text = chunk.content if hasattr(chunk, "content") else str(chunk)
+                        if text:
+                            ok = await _send(websocket, {"type": "token", "content": text})
+                            if not ok:
+                                disconnected = True
+                    continue
 
-        if session.title == "新规划" and len(session.messages) == 0:
-            session.title = _derive_title(body.message, final_state.get("slots", {}))
+                if kind != "on_chain_end":
+                    continue
+                if name == "LangGraph":
+                    continue
+                output = event.get("data", {}).get("output", {})
+                if not isinstance(output, dict):
+                    continue
+                accumulated_state.update(output)
+                steps: list[str] = accumulated_state.get("intermediate_steps", [])
+                for step in steps[last_step_count:]:
+                    if not disconnected:
+                        ok = await _send(websocket, {"type": "status", "content": step})
+                        if not ok:
+                            disconnected = True
+                last_step_count = len(steps)
 
-        ai_msg = {"role": "assistant", "content": ai_content}
-        messages.append(ai_msg)
+            final_state = accumulated_state
+            ai_content = await _build_ai_content(final_state, message)
 
-        session.messages = messages
-        session.slots = final_state.get("slots", {})
-        session.travel_plan = final_state.get("travel_plan")
-        session.updated_at = datetime.now(timezone.utc)
-        await db.commit()
+            if session.title == "新规划" and len(session.messages) == 0:
+                session.title = _derive_title(message, final_state.get("slots", {}))
 
-        yield f"event: done\ndata: {json.dumps({'content': ai_content, 'travel_plan': final_state.get('travel_plan'), 'slots_filled': final_state.get('slots_filled', False)})}\n\n"
+            ai_msg = {"role": "assistant", "content": ai_content}
+            messages.append(ai_msg)
+            session.messages = messages
+            session.slots = final_state.get("slots", {})
+            session.travel_plan = final_state.get("travel_plan")
+            session.updated_at = datetime.now(timezone.utc)
+            await db.commit()
 
-    except Exception as e:
-        err_msg = str(e)
-        if "api_key" in err_msg.lower() or "unauthorized" in err_msg.lower() or "invalid" in err_msg.lower():
-            hint = "API Key 无效或未配置，请在设置中检查。"
-        elif "timeout" in err_msg.lower() or "timed out" in err_msg.lower():
-            hint = "请求超时，请稍后重试。"
-        else:
-            hint = "处理您的请求时遇到问题，请稍后重试。"
-        yield f"event: error\ndata: {json.dumps({'content': hint})}\n\n"
+            if not disconnected:
+                await _send(websocket, {
+                    "type": "done",
+                    "content": ai_content,
+                    "travel_plan": final_state.get("travel_plan"),
+                    "slots_filled": final_state.get("slots_filled", False),
+                })
 
-
-@router.post("/chat/{session_id}")
-async def chat(
-    session_id: str, body: ChatRequest, db: AsyncSession = Depends(get_session)
-):
-    return StreamingResponse(
-        event_stream(session_id, body, db),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",
-        },
-    )
+        except Exception as e:
+            hint = _hint_from_error(str(e))
+            await _send(websocket, {"type": "error", "content": hint})
